@@ -1,30 +1,30 @@
 # cleanleaked
 
-Detect and clean leaked AWS resources left behind by failed HyperShift CI test runs.
+Detect and clean leaked AWS resources left behind by failed HyperShift CI test runs. This standalone tool is maintained in [hypershift-community/aws-leaked-resources](https://github.com/hypershift-community/aws-leaked-resources).
 
 Replaces the previous bash scripts (`detect-leaked-vpcs.sh`, `detect-leaked-hosted-zones.sh`, etc.) with a single Go tool that is testable, safe by design, and consolidates all detection logic.
 
 ## Quick Start
 
 ```bash
-# From the repo root
-make -C contrib/aws-leaked-resources build
+# From the standalone repo root
+make build
 
 # Scan — report only, no deletions
-./contrib/aws-leaked-resources/cleanleaked scan
+./bin/cleanleaked scan
 
 # Preview what would be deleted
-./contrib/aws-leaked-resources/cleanleaked delete --dry-run
+./bin/cleanleaked delete --dry-run
 
 # Delete interactively, 5 at a time
-./contrib/aws-leaked-resources/cleanleaked delete --limit 5 --interactive
+./bin/cleanleaked delete --limit 5 --interactive
 ```
 
 Or run directly with `go run`:
 
 ```bash
-go run ./contrib/aws-leaked-resources/ scan
-go run ./contrib/aws-leaked-resources/ delete --dry-run
+go run . scan
+go run . delete --dry-run
 ```
 
 ## Classification Gates
