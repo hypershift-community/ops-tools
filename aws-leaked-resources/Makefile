@@ -1,25 +1,28 @@
 BINARY := cleanleaked
-REPO_ROOT := $(shell git rev-parse --show-toplevel)
-PKG := ./contrib/aws-leaked-resources
+GOLANGCI_VERSION ?= v2.11.4
 
-.PHONY: build test vet clean scan dry-run
+.PHONY: build test vet lint clean scan dry-run verify
 
 build:
 	@mkdir -p bin
-	cd $(REPO_ROOT) && go build -o $(PKG)/bin/$(BINARY) $(PKG)
-	@echo "Built: bin/$(BINARY)"
+	go build -o bin/$(BINARY) .
 
 test:
-	cd $(REPO_ROOT) && go test $(PKG)/... -count=1 -timeout 120s -v
+	go test ./... -count=1 -timeout=120s -v
 
 vet:
-	cd $(REPO_ROOT) && go vet $(PKG)/...
+	go vet ./...
+
+lint:
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION) run --timeout=5m
 
 clean:
 	rm -rf bin
 
 scan:
-	cd $(REPO_ROOT) && go run $(PKG) scan
+	go run . scan
 
 dry-run:
-	cd $(REPO_ROOT) && go run $(PKG) delete --dry-run
+	go run . delete --dry-run
+
+verify: build test vet lint
