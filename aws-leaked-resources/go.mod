@@ -1,4 +1,4 @@
-module github.com/hypershift-community/aws-leaked-resources
+module github.com/hypershift-community/ops-tools/aws-leaked-resources
 
 go 1.26.3
 
