@@ -23,10 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     container: fedora:44
     steps:
-      # The fedora base image does not ship git, which checkout needs.
-      - name: Install git
+      # The fedora base image is minimal: checkout needs git, verify needs make.
+      - name: Install build tools
         working-directory: ${{ github.workspace }}
-        run: dnf install -y git
+        run: dnf install -y git make
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
