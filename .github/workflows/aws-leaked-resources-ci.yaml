@@ -24,9 +24,13 @@ jobs:
     container: fedora:44
     steps:
       # The fedora base image is minimal: checkout needs git, verify needs make.
+      # The workspace is owned by the host runner user, so plain git calls
+      # (e.g. go build's VCS stamping) need safe.directory to trust it.
       - name: Install build tools
         working-directory: ${{ github.workspace }}
-        run: dnf install -y git make
+        run: |
+          dnf install -y git make
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
