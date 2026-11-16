@@ -1,0 +1,32 @@
+name: aws-leaked-resources CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'aws-leaked-resources/**'
+      - '.github/workflows/aws-leaked-resources-ci.yaml'
+  pull_request:
+    paths:
+      - 'aws-leaked-resources/**'
+      - '.github/workflows/aws-leaked-resources-ci.yaml'
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: aws-leaked-resources
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: aws-leaked-resources/go.mod
+          cache-dependency-path: aws-leaked-resources/go.sum
+          cache: true
+      - name: Verify
+        run: make verify
