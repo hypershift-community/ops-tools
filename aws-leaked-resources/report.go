@@ -24,8 +24,8 @@ func PrintTable(w io.Writer, sets []InfraSet) {
 		return sets[i].InfraID < sets[j].InfraID
 	})
 
-	fmt.Fprintf(w, "%-24s %-12s %-4s %-42s %s\n", "VERDICT", "AGE", "VPCs", "INFRA-ID", "REASON")
-	fmt.Fprintf(w, "%s\n", strings.Repeat("-", 120))
+	_, _ = fmt.Fprintf(w, "%-24s %-12s %-4s %-42s %s\n", "VERDICT", "AGE", "VPCs", "INFRA-ID", "REASON")
+	_, _ = fmt.Fprintf(w, "%s\n", strings.Repeat("-", 120))
 
 	for _, s := range sets {
 		age := ""
@@ -34,7 +34,7 @@ func PrintTable(w io.Writer, sets []InfraSet) {
 		}
 
 		vpcCount := len(s.VPCs)
-		fmt.Fprintf(w, "%-24s %-12s %-4d %-42s %s\n",
+		_, _ = fmt.Fprintf(w, "%-24s %-12s %-4d %-42s %s\n",
 			s.Verdict, age, vpcCount, s.InfraID, s.VerdictReason)
 
 		if s.Verdict == VerdictLeaked || s.Verdict == VerdictUncertain {
@@ -46,25 +46,25 @@ func PrintTable(w io.Writer, sets []InfraSet) {
 				if s.ProwLink != "" {
 					prowInfo += fmt.Sprintf("  prow=%s", s.ProwLink)
 				}
-				fmt.Fprintf(w, "  %-22s %s\n", "", prowInfo)
+				_, _ = fmt.Fprintf(w, "  %-22s %s\n", "", prowInfo)
 			}
 			for _, vpc := range s.VPCs {
 				subRes := formatSubResources(vpc)
 				provenance := formatProvenance(vpc)
-				fmt.Fprintf(w, "  %-22s vpc: %-25s name: %-30s %s%s\n", "", vpc.VPCID, vpc.Name, subRes, provenance)
+				_, _ = fmt.Fprintf(w, "  %-22s vpc: %-25s name: %-30s %s%s\n", "", vpc.VPCID, vpc.Name, subRes, provenance)
 			}
 			for _, z := range s.HostedZones {
 				zType := "public"
 				if z.Private {
 					zType = "private"
 				}
-				fmt.Fprintf(w, "  %-22s zone: %-25s %s (%s, %d records)\n", "", z.ZoneID, z.Name, zType, z.Records)
+				_, _ = fmt.Fprintf(w, "  %-22s zone: %-25s %s (%s, %d records)\n", "", z.ZoneID, z.Name, zType, z.Records)
 			}
 			for _, oidc := range s.OIDCProviders {
-				fmt.Fprintf(w, "  %-22s oidc: %s\n", "", oidc)
+				_, _ = fmt.Fprintf(w, "  %-22s oidc: %s\n", "", oidc)
 			}
 			for _, role := range s.IAMRoles {
-				fmt.Fprintf(w, "  %-22s role: %s\n", "", role)
+				_, _ = fmt.Fprintf(w, "  %-22s role: %s\n", "", role)
 			}
 		}
 	}
@@ -77,17 +77,17 @@ func PrintSummary(w io.Writer, sets []InfraSet) {
 		totalVPCs += len(s.VPCs)
 	}
 
-	fmt.Fprintf(w, "\n")
-	fmt.Fprintf(w, "==============================\n")
-	fmt.Fprintf(w, "  Summary\n")
-	fmt.Fprintf(w, "==============================\n")
-	fmt.Fprintf(w, "  Protected:   %d (%d VPCs)\n", counts[VerdictProtected], countVPCs(sets, VerdictProtected))
-	fmt.Fprintf(w, "  Active:      %d (%d VPCs)\n", counts[VerdictActive], countVPCs(sets, VerdictActive))
-	fmt.Fprintf(w, "  Too young:   %d (%d VPCs)\n", counts[VerdictTooYoung], countVPCs(sets, VerdictTooYoung))
-	fmt.Fprintf(w, "  Uncertain:   %d (%d VPCs)\n", counts[VerdictUncertain], countVPCs(sets, VerdictUncertain))
-	fmt.Fprintf(w, "  Leaked:      %d (%d VPCs)\n", counts[VerdictLeaked], countVPCs(sets, VerdictLeaked))
-	fmt.Fprintf(w, "  Total:       %d infra sets (%d VPCs)\n", len(sets), totalVPCs)
-	fmt.Fprintf(w, "==============================\n")
+	_, _ = fmt.Fprintf(w, "\n")
+	_, _ = fmt.Fprintf(w, "==============================\n")
+	_, _ = fmt.Fprintf(w, "  Summary\n")
+	_, _ = fmt.Fprintf(w, "==============================\n")
+	_, _ = fmt.Fprintf(w, "  Protected:   %d (%d VPCs)\n", counts[VerdictProtected], countVPCs(sets, VerdictProtected))
+	_, _ = fmt.Fprintf(w, "  Active:      %d (%d VPCs)\n", counts[VerdictActive], countVPCs(sets, VerdictActive))
+	_, _ = fmt.Fprintf(w, "  Too young:   %d (%d VPCs)\n", counts[VerdictTooYoung], countVPCs(sets, VerdictTooYoung))
+	_, _ = fmt.Fprintf(w, "  Uncertain:   %d (%d VPCs)\n", counts[VerdictUncertain], countVPCs(sets, VerdictUncertain))
+	_, _ = fmt.Fprintf(w, "  Leaked:      %d (%d VPCs)\n", counts[VerdictLeaked], countVPCs(sets, VerdictLeaked))
+	_, _ = fmt.Fprintf(w, "  Total:       %d infra sets (%d VPCs)\n", len(sets), totalVPCs)
+	_, _ = fmt.Fprintf(w, "==============================\n")
 }
 
 func PrintJSON(w io.Writer, sets []InfraSet) error {
