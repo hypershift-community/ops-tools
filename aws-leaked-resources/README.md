@@ -151,6 +151,17 @@ cleanleaked delete --target 00ab3695c5f73d4354b9 --interactive
 
 ## Prow Correlation
 
+### Scan report format
+
+Use `make scan REGION=us-east-1` or `cleanleaked scan --output json` to save a
+machine-readable inventory in `output/scan-<timestamp>.json`. The JSON output
+is now an object (not a bare array): read `.infraSets` for the inventory and
+`.schemaVersion` (currently `1`) to identify the format. The report includes
+its generation time, AWS region and minimum age. Each infra set can include
+an `anchorTime` and `anchorSource`: the earliest known VPC creation time, or
+an estimate based on the expiry tag. Missing timestamps are omitted. These
+timestamps do not affect classification or deletion.
+
 For each LEAKED infra set, the tool infers:
 - **Test type**: from the infraID pattern (e.g., `node-pool`, `create-cluster`, `e2e-generic`)
 - **HC namespace**: from Route53 `service.ci` zone TXT records

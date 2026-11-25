@@ -162,7 +162,7 @@ func newScanner(ctx context.Context, cfg Config) (*Scanner, error) {
 	}, nil
 }
 
-func openReportFile(outputDir, prefix string) (io.Writer, func(), error) {
+func openReportFile(outputDir, prefix, format string) (io.Writer, func(), error) {
 	if outputDir == "" {
 		return io.Discard, func() {}, nil
 	}
@@ -172,7 +172,11 @@ func openReportFile(outputDir, prefix string) (io.Writer, func(), error) {
 	}
 
 	ts := time.Now().Format("2006-01-02T15-04-05")
-	filename := filepath.Join(outputDir, fmt.Sprintf("%s-%s.txt", prefix, ts))
+	ext := ".txt"
+	if format == "json" {
+		ext = ".json"
+	}
+	filename := filepath.Join(outputDir, prefix+"-"+ts+ext)
 
 	f, err := os.Create(filename)
 	if err != nil {
@@ -201,7 +205,7 @@ func runScan(ctx context.Context, cfg Config) error {
 		return err
 	}
 
-	fileW, closeFile, err := openReportFile(cfg.OutputDir, "scan")
+	fileW, closeFile, err := openReportFile(cfg.OutputDir, "scan", cfg.OutputFormat)
 	if err != nil {
 		return err
 	}
@@ -221,7 +225,14 @@ func runScan(ctx context.Context, cfg Config) error {
 
 	switch cfg.OutputFormat {
 	case "json":
-		if err := PrintJSON(out, results); err != nil {
+		if err := PrintJSON(out, Report{
+			SchemaVersion: reportSchemaVersion,
+			GeneratedAt:   time.Now().UTC(),
+			Command:       "scan",
+			Region:        cfg.Region,
+			MinAge:        cfg.MinAge.String(),
+			InfraSets:     results,
+		}); err != nil {
 			return err
 		}
 	default:
@@ -244,7 +255,7 @@ func runDelete(ctx context.Context, cfg Config) error {
 	} else if cfg.Interactive {
 		prefix = "interactive-delete"
 	}
-	fileW, closeFile, err := openReportFile(cfg.OutputDir, prefix)
+	fileW, closeFile, err := openReportFile(cfg.OutputDir, prefix, "table")
 	if err != nil {
 		return err
 	}

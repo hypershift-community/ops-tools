@@ -23,11 +23,25 @@ type InfraSet struct {
 	OIDCProviders []string
 	Instances     int
 	Age           time.Duration
+	AnchorTime    time.Time `json:"anchorTime,omitzero"`
+	AnchorSource  string    `json:"anchorSource,omitempty"`
 
 	// Prow correlation
 	TestType  string // "node-pool", "create-cluster", "control-plane-upgrade", etc.
 	Namespace string // "e2e-clusters-XXXXX-<cluster>" from service.ci TXT records
 	ProwLink  string // URL to Prow deck search for this test type
+}
+
+const reportSchemaVersion = 1
+
+// Report is the versioned JSON inventory consumed by later stages.
+type Report struct {
+	SchemaVersion int        `json:"schemaVersion"`
+	GeneratedAt   time.Time  `json:"generatedAt"`
+	Command       string     `json:"command"`
+	Region        string     `json:"region"`
+	MinAge        string     `json:"minAge"`
+	InfraSets     []InfraSet `json:"infraSets"`
 }
 
 type VPCInfo struct {

@@ -154,7 +154,27 @@ func (s *Scanner) Scan(ctx context.Context) ([]InfraSet, error) {
 		results = append(results, infraSet)
 	}
 
+	for i := range results {
+		setAnchorTime(&results[i])
+	}
 	return results, nil
+}
+
+func setAnchorTime(infra *InfraSet) {
+	if oldest := oldestVPC(infra.VPCs); !oldest.IsZero() {
+		infra.AnchorTime, infra.AnchorSource = oldest, "vpc"
+		return
+	}
+	var earliest time.Time
+	for _, vpc := range infra.VPCs {
+		if t := vpc.ExpirationDate; !t.IsZero() && (earliest.IsZero() || t.Before(earliest)) {
+			earliest = t
+		}
+	}
+	if !earliest.IsZero() {
+		// The AWS E2E v2 workflow usually sets expiry four hours after setup.
+		infra.AnchorTime, infra.AnchorSource = earliest.Add(-4*time.Hour), "expirationDate"
+	}
 }
 
 // fetchTargetVPCs resolves a --target (VPC ID or infraID) to VPCs.

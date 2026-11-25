@@ -4,26 +4,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 )
 
-func PrintTable(w io.Writer, sets []InfraSet) {
+func sortSets(sets []InfraSet) {
+	order := map[Verdict]int{
+		VerdictProtected: 0,
+		VerdictActive:    1,
+		VerdictTooYoung:  2,
+		VerdictUncertain: 3,
+		VerdictLeaked:    4,
+	}
 	sort.Slice(sets, func(i, j int) bool {
-		order := map[Verdict]int{
-			VerdictProtected: 0,
-			VerdictActive:    1,
-			VerdictTooYoung:  2,
-			VerdictUncertain: 3,
-			VerdictLeaked:    4,
-		}
 		if order[sets[i].Verdict] != order[sets[j].Verdict] {
 			return order[sets[i].Verdict] < order[sets[j].Verdict]
 		}
 		return sets[i].InfraID < sets[j].InfraID
 	})
+}
 
+func PrintTable(w io.Writer, sets []InfraSet) {
+	sortSets(sets)
 	_, _ = fmt.Fprintf(w, "%-24s %-12s %-4s %-42s %s\n", "VERDICT", "AGE", "VPCs", "INFRA-ID", "REASON")
 	_, _ = fmt.Fprintf(w, "%s\n", strings.Repeat("-", 120))
 
@@ -90,10 +94,23 @@ func PrintSummary(w io.Writer, sets []InfraSet) {
 	_, _ = fmt.Fprintf(w, "==============================\n")
 }
 
-func PrintJSON(w io.Writer, sets []InfraSet) error {
+func PrintJSON(w io.Writer, report Report) error {
+	report.InfraSets = append([]InfraSet{}, report.InfraSets...)
+	sortSets(report.InfraSets)
+	for i := range report.InfraSets {
+		set := &report.InfraSets[i]
+		set.VPCs = slices.Clone(set.VPCs)
+		sort.Slice(set.VPCs, func(i, j int) bool { return set.VPCs[i].VPCID < set.VPCs[j].VPCID })
+		set.HostedZones = slices.Clone(set.HostedZones)
+		sort.Slice(set.HostedZones, func(i, j int) bool { return set.HostedZones[i].ZoneID < set.HostedZones[j].ZoneID })
+		set.IAMRoles = slices.Clone(set.IAMRoles)
+		slices.Sort(set.IAMRoles)
+		set.OIDCProviders = slices.Clone(set.OIDCProviders)
+		slices.Sort(set.OIDCProviders)
+	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(sets)
+	return enc.Encode(report)
 }
 
 func formatDuration(d time.Duration) string {
