@@ -30,8 +30,8 @@ Or run directly with `go run`:
 make pipeline REGION=us-east-1
 ```
 
-`make pipeline` runs scan, prove, and a dry-run in sequence. It saves the
-reports together under `output/pipeline.*` and never deletes resources. Each
+`make pipeline` runs scan, prove, HTML reporting, and a dry-run in sequence. It
+saves all reports under `output/pipeline.*` and never deletes resources. Each
 stage can also run separately:
 
 ```bash
@@ -226,6 +226,22 @@ An unresolved, ambiguous, or unavailable lookup stays explicit in the report.
 Presubmits and jobs outside the retained public archive are not covered. A job
 match establishes provenance; it does not establish that the AWS resources are
 unused.
+
+### Generate a browsable HTML report
+
+```bash
+make report INPUT=output/scan-TIMESTAMP.json PROOF=output/proofs-TIMESTAMP.json HTML=output/report.html
+# Or use the CLI:
+cleanleaked report --input output/scan-TIMESTAMP.json --proof output/proofs-TIMESTAMP.json --output output/report.html
+```
+
+Use the actual timestamp for each input; the scan and proof timestamps differ.
+Open the generated file in a browser. The standalone Tokyo Night report has
+the leaked sets on the main view and separate tabs for the other verdicts.
+Expand a set for links to the AWS console, Prow runs, archived metadata, and
+matching artifacts or creation logs. The command reads the saved reports
+without calling AWS or Prow and does not overwrite existing output files.
+Omit `--output` to write HTML to stdout.
 
 ## Safety
 

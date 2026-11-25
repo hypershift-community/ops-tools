@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Cleanleaked · {{.Scan.Region}}</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #1a1b26; --panel: #24283b; --line: #414868;
+      --text: #c0caf5; --muted: #a9b1d6; --blue: #7aa2f7;
+      --cyan: #7dcfff; --violet: #bb9af7; --red: #f7768e;
+      --orange: #ff9e64; --yellow: #e0af68; --green: #9ece6a;
+      font: 16px/1.55 system-ui, sans-serif;
+      background: var(--bg); color: var(--text);
+    }
+    * { box-sizing: border-box; }
+    body { max-width: 76rem; margin: auto; padding: 2rem clamp(1rem, 4vw, 3rem); }
+    header { border-bottom: 1px solid var(--line); padding-bottom: 1rem; }
+    h1, h2, h3, p { margin: .25rem 0 .7rem; }
+    h1 { font-size: clamp(1.7rem, 4vw, 2.7rem); line-height: 1.15; }
+    h2 { font-size: 1.3rem; }
+    h3 { font-size: 1.05rem; color: var(--cyan); }
+    a { color: var(--cyan); text-underline-offset: .2em; }
+    a:hover { color: var(--violet); }
+    :focus-visible { outline: 2px solid var(--yellow); outline-offset: 3px; }
+    code, .label, .badge { font-family: ui-monospace, monospace; }
+    code, a, dd { overflow-wrap: anywhere; }
+    .label { color: var(--violet); font-size: .85rem; letter-spacing: .08em; }
+    .muted, dt { color: var(--muted); }
+    .metrics { display: flex; flex-wrap: wrap; gap: .6rem; padding: 0; list-style: none; }
+    .metrics li { flex: 1 0 8rem; padding: .6rem .8rem; background: var(--panel); border: 1px solid var(--line); border-radius: .6rem; }
+    .metrics strong { display: block; font-size: 1.35rem; }
+    .verdict-tabs { position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; gap: .4rem; padding: .65rem 0; margin-bottom: 1rem; background: var(--bg); border-bottom: 1px solid var(--line); }
+    .verdict-tabs a { padding: .25rem .55rem; border: 1px solid var(--line); border-radius: .4rem; text-decoration: none; }
+    main:not(:has(.other-panel:target)) a[href="#leaked"],
+    main:has(#uncertain:target) a[href="#uncertain"], main:has(#active:target) a[href="#active"],
+    main:has(#too-young:target) a[href="#too-young"], main:has(#protected:target) a[href="#protected"] { border-color: var(--violet); background: var(--panel); color: var(--violet); }
+    .verdict-section { scroll-margin-top: 7rem; }
+    .other-panel { display: none; margin-top: 1.5rem; }
+    .other-panel:target { display: block; }
+    details { background: var(--panel); border: 1px solid var(--line); border-radius: .6rem; margin: .55rem 0; }
+    summary { cursor: pointer; padding: .7rem .85rem; }
+    summary::marker { color: var(--blue); }
+    .badge { display: inline-block; padding: .03em .55em; border: 1px solid currentColor; border-radius: 1em; margin: .12rem .4rem .12rem 0; font-size: .8rem; color: var(--violet); }
+    .LEAKED { color: var(--red); } .UNCERTAIN { color: var(--yellow); }
+    .ACTIVE { color: var(--green); } .TOO_YOUNG { color: var(--orange); } .PROTECTED { color: var(--blue); }
+    .content { border-top: 1px solid var(--line); padding: .8rem 1rem; }
+    .columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: 1rem; }
+    ul { padding-left: 1.3rem; } li { margin: .2rem 0; }
+    dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .15rem .7rem; }
+    dd { margin: 0; }
+    footer { margin-top: 1.5rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <p class="label">CLEANLEAKED / AWS + PROW</p>
+    <h1>Leak investigation report</h1>
+    <p class="muted">Region <code>{{.Scan.Region}}</code> · Minimum scan age <code>{{.Scan.MinAge}}</code></p>
+    <p class="muted">Scanned {{stamp .Scan.GeneratedAt}} · Proof generated {{stamp .Proof.GeneratedAt}}</p>
+  </header>
+  <main>
+    <ul class="metrics" aria-label="Report totals">
+      <li><strong class="LEAKED">{{count .Totals "LEAKED"}}</strong>Leaked</li>
+      <li><strong class="UNCERTAIN">{{count .Totals "UNCERTAIN"}}</strong>Uncertain</li>
+      <li><strong class="ACTIVE">{{count .Totals "ACTIVE"}}</strong>Active</li>
+      <li><strong class="TOO_YOUNG">{{count .Totals "TOO_YOUNG"}}</strong>Too young</li>
+      <li><strong class="PROTECTED">{{count .Totals "PROTECTED"}}</strong>Protected</li>
+      <li><strong>{{.Matched}}</strong>Prow matches</li>
+    </ul>
+    <p class="muted">Prow matches establish provenance, not permission to delete. AWS console links use your signed-in account.</p>
+    {{if .Ignored}}<p class="muted">{{.Ignored}} proof entries did not bind to a candidate in this scan.</p>{{end}}
+    <nav class="verdict-tabs" aria-label="Infrastructure verdicts">
+      <a href="#leaked">Leaked ({{len .Leaked.Rows}})</a>
+      {{range .Other}}<a href="#{{.ID}}">{{.Title}} ({{len .Rows}})</a>{{end}}
+    </nav>
+    <section id="leaked" class="verdict-section" aria-labelledby="leaked-heading">
+      {{template "inventory" .Leaked}}
+    </section>
+    {{range .Other}}
+    <section id="{{.ID}}" class="verdict-section other-panel" aria-labelledby="{{.ID}}-heading">
+      {{template "inventory" .}}
+    </section>
+    {{end}}
+  </main>
+  <footer>Generated from saved reports. No live lookups are performed by this page.</footer>
+</body>
+</html>
+{{define "inventory"}}
+    <h2 id="{{.ID}}-heading">{{.Title}} ({{len .Rows}})</h2>
+    {{range .Rows}}
+    <details>
+      <summary>
+        <span class="badge {{.Verdict}}">{{.Verdict}}</span>
+        <code>{{.InfraID}}</code> · {{len .VPCs}} VPC(s)
+        {{with .Prow}}<span class="badge">Prow: {{.Status}}{{if .Result}} / {{.Result}}{{end}}</span>{{end}}
+      </summary>
+      <div class="content">
+        <p>{{.VerdictReason}}</p>
+        {{if .AnchorSource}}<p class="muted">Search anchor: {{stamp .AnchorTime}} ({{.AnchorSource}})</p>{{end}}
+        <div class="columns">
+          <section>
+            <h3>AWS inventory</h3>
+            <ul>
+              {{range .VPCs}}
+              <li>{{if .VPCID}}<a href="{{awsURL $.Region "vpc" .VPCID}}"><code>{{.VPCID}}</code></a>{{else}}VPC ID unavailable{{end}}
+                {{if .Name}} · {{.Name}}{{end}}{{if .OwnerID}} · account <code>{{.OwnerID}}</code>{{end}}
+                {{if .ProwJobID}}<br><span class="muted">Prow tag: <code>{{.ProwJobID}}</code></span>{{end}}
+                {{if .EndpointIDs}}<ul>{{range .EndpointIDs}}<li>Endpoint <a href="{{awsURL $.Region "endpoint" .}}"><code>{{.}}</code></a></li>{{end}}</ul>{{end}}
+              </li>
+              {{end}}
+              {{range .HostedZones}}<li>Hosted zone <a href="{{awsURL $.Region "zone" .ZoneID}}"><code>{{.ZoneID}}</code></a> · {{.Name}} ({{.Records}} records)</li>{{end}}
+              {{range .IAMRoles}}<li>IAM role <a href="{{awsURL $.Region "role" .}}"><code>{{.}}</code></a></li>{{end}}
+              {{range .OIDCProviders}}<li>OIDC provider <a href="{{awsURL $.Region "oidc" .}}"><code>{{.}}</code></a></li>{{end}}
+            </ul>
+          </section>
+          <section>
+            <h3>Prow evidence</h3>
+            {{if .Namespace}}<p>Hosted cluster namespace: <code>{{.Namespace}}</code></p>{{end}}
+            {{if .ProofNote}}<p>{{.ProofNote}}</p>{{end}}
+            {{if .Prow}}
+              {{if eq .Prow.Status "matched"}}
+                <p>{{with deck .ProwLink}}<a href="{{.}}">Open Prow run</a> · {{end}}{{.Prow.Job}}</p>
+                <dl>
+                  <dt>Build</dt><dd><code>{{.Prow.BuildID}}</code> · {{.Prow.Result}}</dd>
+                  <dt>Job ID</dt><dd><code>{{.Prow.JobID}}</code></dd>
+                  <dt>Created</dt><dd>{{stamp .Prow.CreatedAt}}</dd>
+                  <dt>Matched by</dt><dd>{{.Prow.Method}}{{if .Prow.MatchedHex}} · <code>{{.Prow.MatchedHex}}</code>{{end}}</dd>
+                </dl>
+                <ul>
+                  {{with archive .Prow.MetadataURL}}<li><a href="{{.}}">Job metadata (prowjob.json)</a></li>{{end}}
+                  {{with archive .Prow.ArtifactURL}}<li><a href="{{.}}">Matching artifact name</a> (not resource confirmation)</li>{{end}}
+                  {{range .Prow.Resources}}<li>{{with archive .URL}}<a href="{{.}}">Creation log</a> · {{end}}<code>{{.ID}}</code></li>{{end}}
+                </ul>
+                {{if .Prow.ArtifactNote}}<p class="muted">{{.Prow.ArtifactNote}}</p>{{end}}
+              {{else}}
+                <p>{{.Prow.Status}}{{if .Prow.Reason}} · {{.Prow.Reason}}{{end}}</p>
+                {{with deck .ProwLink}}<p><a href="{{.}}">Search Prow</a> (hint only)</p>{{end}}
+              {{end}}
+            {{else}}
+              {{if not .ProofNote}}<p class="muted">Not inspected by Prow.</p>{{end}}
+              {{with deck .ProwLink}}<p><a href="{{.}}">Search Prow</a> (hint only)</p>{{end}}
+            {{end}}
+          </section>
+        </div>
+      </div>
+    </details>
+    {{else}}<p>No infrastructure sets with this verdict.</p>{{end}}
+{{end}}

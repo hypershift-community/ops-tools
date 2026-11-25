@@ -25,6 +25,10 @@ func loadDeleteProof(filename, region string) (map[string]InfraSet, error) {
 	if report.Region != region {
 		return nil, fmt.Errorf("proof region %q does not match delete region %q", report.Region, region)
 	}
+	return indexProofs(report)
+}
+
+func indexProofs(report Report) (map[string]InfraSet, error) {
 	index := make(map[string]InfraSet, len(report.InfraSets))
 	for _, set := range report.InfraSets {
 		if _, exists := index[set.InfraID]; set.InfraID == "" || exists {

@@ -138,6 +138,23 @@ Examples:
 	if err := proveCmd.MarkFlagRequired("input"); err != nil {
 		panic(err)
 	}
+	var reportScan, reportProof, reportOutput string
+	reportCmd := &cobra.Command{
+		Use:   "report",
+		Short: "Render a standalone HTML report from saved scan and proof JSON",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runHTMLReport(reportScan, reportProof, reportOutput, cmd.OutOrStdout())
+		},
+	}
+	reportCmd.Flags().StringVar(&reportScan, "input", "", "Scan JSON report")
+	reportCmd.Flags().StringVar(&reportProof, "proof", "", "JSON report produced by prove")
+	reportCmd.Flags().StringVar(&reportOutput, "output", "-", "New HTML file (or - for stdout)")
+	for _, flag := range []string{"input", "proof"} {
+		if err := reportCmd.MarkFlagRequired(flag); err != nil {
+			panic(err)
+		}
+	}
 
 	scanCmd.Flags().StringVar(&cfg.Region, "region", cfg.Region, "AWS region")
 	scanCmd.Flags().DurationVar(&cfg.MinAge, "min-age", cfg.MinAge, "Minimum VPC age to consider for deletion")
@@ -157,7 +174,7 @@ Examples:
 	deleteCmd.Flags().StringVar(&cfg.ProofFile, "proof", "", "JSON report produced by prove")
 	deleteCmd.Flags().BoolVar(&cfg.RequireProof, "require-proof", cfg.RequireProof, "Require matching Prow proof before deleting a LEAKED candidate")
 
-	rootCmd.AddCommand(scanCmd, proveCmd, deleteCmd)
+	rootCmd.AddCommand(scanCmd, proveCmd, reportCmd, deleteCmd)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sigs := make(chan os.Signal, 1)
