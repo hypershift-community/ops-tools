@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"slices"
@@ -19,13 +20,14 @@ import (
 )
 
 type Scanner struct {
-	EC2     EC2API
-	ELBv2   ELBv2API
-	Route53 Route53API
-	IAM     IAMAPI
-	S3      S3API
-	Config  Config
-	Now     func() time.Time
+	EC2      EC2API
+	ELBv2    ELBv2API
+	Route53  Route53API
+	IAM      IAMAPI
+	S3       S3API
+	Config   Config
+	Now      func() time.Time
+	Progress io.Writer
 
 	lbCache  []lbCacheEntry
 	lbCached bool
@@ -44,14 +46,18 @@ func (s *Scanner) now() time.Time {
 }
 
 func (s *Scanner) Scan(ctx context.Context) ([]InfraSet, error) {
+	out := s.Progress
+	if out == nil {
+		out = os.Stderr
+	}
 	var vpcs []ec2types.Vpc
 	var err error
 
 	if s.Config.Target != "" {
-		fmt.Fprintf(os.Stderr, "  Fetching target: %s\n", s.Config.Target)
+		_, _ = fmt.Fprintf(out, "  Fetching target: %s\n", s.Config.Target)
 		vpcs, err = s.fetchTargetVPCs(ctx, s.Config.Target)
 	} else {
-		fmt.Fprintf(os.Stderr, "  Fetching VPCs...\n")
+		_, _ = fmt.Fprintln(out, "  Fetching VPCs...")
 		vpcs, err = s.fetchAllVPCs(ctx)
 	}
 	if err != nil {
@@ -70,23 +76,23 @@ func (s *Scanner) Scan(ctx context.Context) ([]InfraSet, error) {
 			return nil, err
 		}
 	}
-	fmt.Fprintf(os.Stderr, "  Found %d VPCs, %d infra sets\n", len(vpcs), len(grouped))
+	_, _ = fmt.Fprintf(out, "  Found %d VPCs, %d infra sets\n", len(vpcs), len(grouped))
 
-	fmt.Fprintf(os.Stderr, "  Fetching OIDC providers...\n")
+	_, _ = fmt.Fprintln(out, "  Fetching OIDC providers...")
 	oidcMap, err := s.fetchOIDCProviders(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetching OIDC providers: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "  Found %d OIDC providers\n", len(oidcMap))
+	_, _ = fmt.Fprintf(out, "  Found %d OIDC providers\n", len(oidcMap))
 
-	fmt.Fprintf(os.Stderr, "  Classifying %d infra sets...\n", len(grouped))
+	_, _ = fmt.Fprintf(out, "  Classifying %d infra sets...\n", len(grouped))
 	progress := 0
 	leakedFound := 0
 	var results []InfraSet
 	for infraID, vpcInfos := range grouped {
 		progress++
 		if progress%10 == 0 {
-			fmt.Fprintf(os.Stderr, "    %d/%d ...\n", progress, len(grouped))
+			_, _ = fmt.Fprintf(out, "    %d/%d ...\n", progress, len(grouped))
 		}
 
 		limitReached := s.Config.Limit > 0 && leakedFound >= s.Config.Limit
@@ -151,9 +157,9 @@ func (s *Scanner) Scan(ctx context.Context) ([]InfraSet, error) {
 
 		leakedFound++
 		if s.Config.Limit > 0 {
-			fmt.Fprintf(os.Stderr, "    LEAKED [%d/%d]: %s — inventorying sub-resources...\n", leakedFound, s.Config.Limit, infraID)
+			_, _ = fmt.Fprintf(out, "    LEAKED [%d/%d]: %s — inventorying sub-resources...\n", leakedFound, s.Config.Limit, infraID)
 		} else {
-			fmt.Fprintf(os.Stderr, "    LEAKED: %s — inventorying sub-resources...\n", infraID)
+			_, _ = fmt.Fprintf(out, "    LEAKED: %s — inventorying sub-resources...\n", infraID)
 		}
 		s.inventorySubResources(ctx, &infraSet)
 		s.inventoryHostedZones(ctx, &infraSet)

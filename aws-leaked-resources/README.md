@@ -11,6 +11,9 @@ Replaces the previous bash scripts (`detect-leaked-vpcs.sh`, `detect-leaked-host
 cd aws-leaked-resources
 make build
 
+# Scan, collect evidence, and generate HTML without deleting anything
+./bin/cleanleaked flow --region us-east-1
+
 # Scan — AWS inventory only, no deletions
 ./bin/cleanleaked scan --output json
 
@@ -24,11 +27,19 @@ make build
 ./bin/cleanleaked delete --limit 5 --interactive --proof output/proofs-<timestamp>.json
 ```
 
-Or run directly with `go run`:
+Or run the investigation flow through Make:
 
 ```bash
-make pipeline REGION=us-east-1
+make flow REGION=us-east-1
 ```
+
+`flow` saves `scan.json`, `proofs.json`, and `report.html` together in a new
+directory under `output/flow-*`. It prints the report path and, if any leaked
+sets meet the proof requirement, an interactive cleanup command to run only
+after reviewing the findings. The flow never runs cleanup. Use `--target`,
+`--min-age`, or `--output-dir` to change the scope or destination (`TARGET`,
+`MIN_AGE`, and `OUTPUT_DIR` with Make). Run `cleanleaked flow --help` for Prow
+lookup options. Add `--verbose` to show detailed AWS scan progress.
 
 `make pipeline` runs scan, prove, HTML reporting, and a dry-run in sequence. It
 saves all reports under `output/pipeline.*` and never deletes resources. Each

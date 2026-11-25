@@ -138,6 +138,10 @@ func runHTMLReport(scanPath, proofPath, output string, stdout io.Writer) error {
 	if output == "-" {
 		return writeHTMLReport(stdout, scan, proof)
 	}
+	return writeHTMLFile(output, scan, proof)
+}
+
+func writeHTMLFile(output string, scan, proof Report) error {
 	var html bytes.Buffer
 	if err := writeHTMLReport(&html, scan, proof); err != nil {
 		return err

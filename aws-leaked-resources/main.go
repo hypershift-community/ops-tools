@@ -119,7 +119,7 @@ Examples:
 			return err
 		},
 	}
-	proof := proofOptions{window: 6 * time.Hour, timeout: 2 * time.Minute, verifyArtifacts: true, outputDir: cfg.OutputDir}
+	proof := defaultProofOptions(cfg.OutputDir)
 	proveCmd := &cobra.Command{
 		Use:   "prove",
 		Short: "Look up Prow provenance for scan candidates without accessing AWS",
@@ -130,9 +130,7 @@ Examples:
 	}
 	proveCmd.Flags().StringVar(&proof.input, "input", "", "Scan JSON report")
 	proveCmd.Flags().StringVar(&proof.target, "infra-id", "", "Look up only this candidate")
-	proveCmd.Flags().DurationVar(&proof.window, "prow-window", proof.window, "Search this far on either side of the AWS timestamp (max 7 days)")
-	proveCmd.Flags().DurationVar(&proof.timeout, "prow-timeout", proof.timeout, "Overall Prow archive timeout")
-	proveCmd.Flags().BoolVar(&proof.verifyArtifacts, "prow-verify-artifacts", true, "Look for candidate artifacts and exact AWS resource IDs in creation logs")
+	bindProwFlags(proveCmd, &proof)
 	proveCmd.Flags().StringVar(&proof.outputDir, "output-dir", proof.outputDir, "Directory for the JSON proof report (empty to disable)")
 	proveCmd.Flags().BoolVar(&proof.json, "json", false, "Print JSON instead of the human-readable report")
 	if err := proveCmd.MarkFlagRequired("input"); err != nil {
@@ -174,7 +172,7 @@ Examples:
 	deleteCmd.Flags().StringVar(&cfg.ProofFile, "proof", "", "JSON report produced by prove")
 	deleteCmd.Flags().BoolVar(&cfg.RequireProof, "require-proof", cfg.RequireProof, "Require matching Prow proof before deleting a LEAKED candidate")
 
-	rootCmd.AddCommand(scanCmd, proveCmd, reportCmd, deleteCmd)
+	rootCmd.AddCommand(scanCmd, proveCmd, reportCmd, newFlowCommand(), deleteCmd)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sigs := make(chan os.Signal, 1)
@@ -246,45 +244,49 @@ func promptYN(question string) bool {
 	return strings.HasPrefix(strings.TrimSpace(strings.ToLower(answer)), "y")
 }
 
-func runScan(ctx context.Context, cfg Config) error {
+func scanForReport(ctx context.Context, cfg Config, progress io.Writer) (Report, error) {
 	scanner, err := newScanner(ctx, cfg)
+	if err != nil {
+		return Report{}, err
+	}
+	scanner.Progress = progress
+	_, _ = fmt.Fprintf(progress, "Scanning VPCs in %s (min-age: %s)...\n", cfg.Region, cfg.MinAge)
+
+	results, err := scanner.Scan(ctx)
+	if err != nil {
+		return Report{}, fmt.Errorf("scan failed: %w", err)
+	}
+
+	_, _ = fmt.Fprintln(progress, "Adding CI hints from AWS inventory...")
+	CorrelateWithProw(ctx, scanner.Route53, results)
+	if err := ctx.Err(); err != nil {
+		return Report{}, err
+	}
+	return Report{
+		SchemaVersion: reportSchemaVersion, GeneratedAt: time.Now().UTC(), Command: "scan",
+		Region: cfg.Region, MinAge: cfg.MinAge.String(), InfraSets: results,
+	}, nil
+}
+
+func runScan(ctx context.Context, cfg Config) error {
+	report, err := scanForReport(ctx, cfg, os.Stderr)
 	if err != nil {
 		return err
 	}
-
 	fileW, closeFile, err := openReportFile(cfg.OutputDir, "scan", cfg.OutputFormat)
 	if err != nil {
 		return err
 	}
 	defer closeFile()
 
-	fmt.Fprintf(os.Stderr, "Scanning VPCs in %s (min-age: %s)...\n", cfg.Region, cfg.MinAge)
-
-	results, err := scanner.Scan(ctx)
-	if err != nil {
-		return fmt.Errorf("scan failed: %w", err)
-	}
-
-	fmt.Fprintf(os.Stderr, "Adding CI hints from AWS inventory...\n")
-	CorrelateWithProw(ctx, scanner.Route53, results)
-
 	out := tee(os.Stdout, fileW)
 
 	switch cfg.OutputFormat {
 	case "json":
-		if err := PrintJSON(out, Report{
-			SchemaVersion: reportSchemaVersion,
-			GeneratedAt:   time.Now().UTC(),
-			Command:       "scan",
-			Region:        cfg.Region,
-			MinAge:        cfg.MinAge.String(),
-			InfraSets:     results,
-		}); err != nil {
-			return err
-		}
+		return PrintJSON(out, report)
 	default:
-		PrintTable(out, results)
-		PrintSummary(out, results)
+		PrintTable(out, report.InfraSets)
+		PrintSummary(out, report.InfraSets)
 	}
 
 	return nil
@@ -296,26 +298,51 @@ type proofOptions struct {
 	verifyArtifacts, json    bool
 }
 
-func runProve(ctx context.Context, cfg proofOptions) error {
+func defaultProofOptions(outputDir string) proofOptions {
+	return proofOptions{window: 6 * time.Hour, timeout: 2 * time.Minute, verifyArtifacts: true, outputDir: outputDir}
+}
+
+func bindProwFlags(cmd *cobra.Command, proof *proofOptions) {
+	cmd.Flags().DurationVar(&proof.window, "prow-window", proof.window, "Search this far on either side of the AWS timestamp (max 7 days)")
+	cmd.Flags().DurationVar(&proof.timeout, "prow-timeout", proof.timeout, "Overall Prow archive timeout")
+	cmd.Flags().BoolVar(&proof.verifyArtifacts, "prow-verify-artifacts", proof.verifyArtifacts, "Look for candidate artifacts and exact AWS resource IDs in creation logs")
+}
+
+func (cfg proofOptions) validate() error {
 	if cfg.window <= 0 || cfg.window > 7*24*time.Hour || cfg.timeout <= 0 {
 		return fmt.Errorf("require a positive --prow-window (at most 7 days) and --prow-timeout")
 	}
-	report, err := readReport(cfg.input, "scan")
-	if err != nil {
-		return err
-	}
+	return nil
+}
+
+func proveScan(ctx context.Context, report Report, cfg proofOptions) (Report, error) {
 	archive := prowArchive{baseURL: prowStorageURL, client: &http.Client{Timeout: 15 * time.Second}}
 	lookupCtx, cancel := context.WithTimeout(ctx, cfg.timeout)
 	defer cancel()
 	report.InfraSets = archive.prove(lookupCtx, report.InfraSets, cfg.target, cfg.window, cfg.verifyArtifacts)
 	if err := ctx.Err(); err != nil {
-		return err
+		return Report{}, err
 	}
 	if cfg.target != "" && len(report.InfraSets) == 0 {
-		return fmt.Errorf("no leak candidate with infra ID %q in scan report", cfg.target)
+		return Report{}, fmt.Errorf("no leak candidate with infra ID %q in scan report", cfg.target)
 	}
 	report.Command = "prove"
 	report.GeneratedAt = time.Now().UTC()
+	return report, nil
+}
+
+func runProve(ctx context.Context, cfg proofOptions) error {
+	if err := cfg.validate(); err != nil {
+		return err
+	}
+	report, err := readReport(cfg.input, "scan")
+	if err != nil {
+		return err
+	}
+	report, err = proveScan(ctx, report, cfg)
+	if err != nil {
+		return err
+	}
 	fileW, closeFile, err := openReportFile(cfg.outputDir, "proofs", "json")
 	if err != nil {
 		return err

@@ -1,11 +1,14 @@
 BINARY := cleanleaked
 GOLANGCI_VERSION ?= v2.11.4
 REGION ?= us-east-1
+MIN_AGE ?= 24h
+TARGET ?=
+OUTPUT_DIR ?= output
 INPUT ?=
 PROOF ?=
 HTML ?= output/report.html
 
-.PHONY: build test vet lint clean scan prove report dry-run delete pipeline verify
+.PHONY: build test vet lint clean scan prove report flow dry-run delete pipeline verify
 
 build:
 	@mkdir -p bin
@@ -31,6 +34,9 @@ prove:
 
 report:
 	go run . report --input "$(INPUT)" --proof "$(PROOF)" --output "$(HTML)"
+
+flow: build
+	./bin/$(BINARY) flow --region "$(REGION)" --min-age "$(MIN_AGE)" --target "$(TARGET)" --output-dir "$(OUTPUT_DIR)"
 
 dry-run:
 	go run . delete --dry-run --region "$(REGION)" --proof "$(PROOF)"
