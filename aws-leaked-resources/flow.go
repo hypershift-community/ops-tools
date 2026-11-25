@@ -35,7 +35,7 @@ func newFlowCommand() *cobra.Command {
 	cmd.Flags().DurationVar(&cfg.scan.MinAge, "min-age", cfg.scan.MinAge, "Minimum VPC age to consider for deletion")
 	cmd.Flags().StringVar(&cfg.scan.Target, "target", "", "Scan a single infra ID or VPC ID instead of all VPCs")
 	cmd.Flags().StringVar(&cfg.scan.OutputDir, "output-dir", cfg.scan.OutputDir, "Parent directory for this run's scan, proof, and HTML reports")
-	cmd.Flags().BoolVar(&cfg.verbose, "verbose", false, "Show detailed AWS scan progress")
+	cmd.Flags().BoolVarP(&cfg.verbose, "verbose", "v", false, "Show detailed AWS scan progress, including each leaked infra set")
 	bindProwFlags(cmd, &cfg.proof)
 	return cmd
 }

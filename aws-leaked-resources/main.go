@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -112,11 +111,7 @@ Examples:
   cleanleaked delete --confirm --min-age 48h --proof output/proofs-<timestamp>.json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg.Delete = true
-			err := runDelete(cmd.Context(), cfg)
-			if errors.Is(err, errUnprovenLeaks) {
-				cmd.SilenceUsage = true
-			}
-			return err
+			return runDelete(cmd.Context(), cfg, newScanner)
 		},
 	}
 	proof := defaultProofOptions(cfg.OutputDir)
@@ -183,9 +178,6 @@ Examples:
 	}()
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		if errors.Is(err, errUnprovenLeaks) {
-			os.Exit(2)
-		}
 		os.Exit(1)
 	}
 }
@@ -359,7 +351,7 @@ func runProve(ctx context.Context, cfg proofOptions) error {
 	return nil
 }
 
-func runDelete(ctx context.Context, cfg Config) error {
+func runDelete(ctx context.Context, cfg Config, makeScanner func(context.Context, Config) (*Scanner, error)) error {
 	proofs, err := loadDeleteProof(cfg.ProofFile, cfg.Region)
 	if err != nil {
 		return err
@@ -368,7 +360,7 @@ func runDelete(ctx context.Context, cfg Config) error {
 	scanCfg := cfg
 	scanCfg.Delete = true
 	scanCfg.Limit = 0
-	scanner, err := newScanner(ctx, scanCfg)
+	scanner, err := makeScanner(ctx, scanCfg)
 	if err != nil {
 		return err
 	}
@@ -411,7 +403,14 @@ func runDelete(ctx context.Context, cfg Config) error {
 		PrintSummary(out, results)
 	}
 	if skipped > 0 {
-		_, _ = fmt.Fprintf(out, "\nSkipped %d leaked infra sets without sufficient proof. Run prove and pass --proof <file>; use --require-proof=false only after manual review.\n", skipped)
+		defer func() {
+			_, _ = fmt.Fprintf(out, "\nLeaked infra sets not deleted (insufficient Prow proof): %d\n", skipped)
+			for _, set := range results {
+				if set.Verdict == VerdictLeaked && set.DeleteBlock != "" {
+					_, _ = fmt.Fprintf(out, "  - %s: %s\n", set.InfraID, set.DeleteBlock)
+				}
+			}
+		}()
 	}
 	if !cfg.RequireProof {
 		_, _ = fmt.Fprintln(out, "\nWARNING: Prow proof requirement disabled. AWS classification still applies.")
@@ -421,9 +420,6 @@ func runDelete(ctx context.Context, cfg Config) error {
 	}
 	if len(leaked) == 0 {
 		_, _ = fmt.Fprintln(out, "\nNo eligible leaked resources to delete.")
-		if skipped > 0 && !cfg.DryRun {
-			return errUnprovenLeaks
-		}
 		return nil
 	}
 
@@ -463,11 +459,5 @@ func runDelete(ctx context.Context, cfg Config) error {
 			}
 		}
 	}
-	if err := deleter.DeleteAll(ctx, leaked, mode); err != nil {
-		return err
-	}
-	if skipped > 0 {
-		return errUnprovenLeaks
-	}
-	return nil
+	return deleter.DeleteAll(ctx, leaked, mode)
 }

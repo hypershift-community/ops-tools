@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -9,9 +8,8 @@ import (
 )
 
 var (
-	errUnprovenLeaks = errors.New("leaked infra sets skipped because required Prow proof was missing or insufficient")
-	periodicJobName  = regexp.MustCompile(`^periodic-ci-openshift-hypershift-[a-z0-9][a-z0-9.-]*$`)
-	prowBuildID      = regexp.MustCompile(`^[0-9]{19}$`)
+	periodicJobName = regexp.MustCompile(`^periodic-ci-openshift-hypershift-[a-z0-9][a-z0-9.-]*$`)
+	prowBuildID     = regexp.MustCompile(`^[0-9]{19}$`)
 )
 
 func loadDeleteProof(filename, region string) (map[string]InfraSet, error) {

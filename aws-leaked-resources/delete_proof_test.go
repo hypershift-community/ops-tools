@@ -1,12 +1,80 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 )
+
+func TestDeleteReportsUnprovenLeaks(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		withProof   bool
+		wantDeleted []string
+	}{
+		{name: "When every leak lacks proof, it should report the skipped leak and succeed"},
+		{name: "When only one leak has proof, it should delete that leak and report the skipped one", withProof: true, wantDeleted: []string{"vpc-proven"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.Confirm, cfg.OutputDir = true, t.TempDir()
+			now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+			created := now.Add(-48 * time.Hour)
+			ec2Client := &deleteProofEC2{vpcs: []ec2types.Vpc{makeVPCWithAge("vpc-unproven", "node-pool-unproven-vpc", "node-pool-unproven", created)}}
+			if tc.withProof {
+				vpc := makeVPCWithAge("vpc-proven", "node-pool-proven-vpc", "node-pool-proven", created)
+				vpc.OwnerId = aws.String("test-owner")
+				vpc.Tags = append(vpc.Tags, ec2types.Tag{Key: aws.String(TagHypershiftProwJobID), Value: aws.String(fixtureJobID)})
+				ec2Client.vpcs = append(ec2Client.vpcs, vpc)
+				cfg.ProofFile = filepath.Join(cfg.OutputDir, "proofs.json")
+				receipt := InfraSet{InfraID: "node-pool-proven", VPCs: []VPCInfo{{VPCID: "vpc-proven", OwnerID: "test-owner"}}, Prow: &ProwProof{
+					Status: "matched", Result: "failure", Method: "tag", Job: fixtureJob, JobID: fixtureJobID,
+					BuildID: fixtureBuild, CreatedAt: created, MetadataURL: prowStorageURL + "/" + prowBucket + "/" + runPath(fixtureJob, fixtureBuild) + "prowjob.json",
+				}}
+				if err := saveFlowJSON(cfg.ProofFile, Report{SchemaVersion: reportSchemaVersion, Command: "prove", Region: cfg.Region, InfraSets: []InfraSet{receipt}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := runDelete(t.Context(), cfg, func(_ context.Context, scanCfg Config) (*Scanner, error) {
+				return &Scanner{EC2: ec2Client, Route53: &mockRoute53{}, IAM: &mockIAM{}, S3: &mockS3{}, Config: scanCfg, Now: func() time.Time { return now }}, nil
+			}); err != nil {
+				t.Fatalf("expected skips to be informational, got %v", err)
+			}
+			if !slices.Equal(ec2Client.deletedVPCs, tc.wantDeleted) {
+				t.Fatalf("deleted VPCs = %v, want %v", ec2Client.deletedVPCs, tc.wantDeleted)
+			}
+			files, err := filepath.Glob(filepath.Join(cfg.OutputDir, "delete-*.txt"))
+			if err != nil || len(files) != 1 {
+				t.Fatalf("expected one cleanup report, got %v: %v", files, err)
+			}
+			output, err := os.ReadFile(files[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "Leaked infra sets not deleted (insufficient Prow proof): 1\n  - node-pool-unproven: no proof supplied for this infra set\n"
+			if !strings.HasSuffix(string(output), want) {
+				t.Fatalf("cleanup report must end with %q; got:\n%s", want, output)
+			}
+		})
+	}
+}
+
+type deleteProofEC2 struct {
+	trackingEC2
+	vpcs []ec2types.Vpc
+}
+
+func (m *deleteProofEC2) DescribeVpcs(context.Context, *ec2.DescribeVpcsInput, ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error) {
+	return &ec2.DescribeVpcsOutput{Vpcs: m.vpcs}, nil
+}
 
 func TestSelectDeletable(t *testing.T) {
 	for _, tc := range []struct {
