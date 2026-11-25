@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -433,11 +434,7 @@ func (s *Scanner) resolveVPCCreationTime(ctx context.Context, infra *InfraSet) {
 		if out, err := s.EC2.DescribeVpcEndpoints(ctx, &ec2.DescribeVpcEndpointsInput{
 			Filters: []ec2types.Filter{{Name: aws.String("vpc-id"), Values: []string{vpc.VPCID}}},
 		}); err == nil {
-			for _, ep := range out.VpcEndpoints {
-				if ep.CreationTimestamp != nil && (infra.VPCs[i].CreatedAt.IsZero() || ep.CreationTimestamp.Before(infra.VPCs[i].CreatedAt)) {
-					infra.VPCs[i].CreatedAt = *ep.CreationTimestamp
-				}
-			}
+			observeEndpoints(&infra.VPCs[i], out.VpcEndpoints)
 		}
 		if infra.VPCs[i].CreatedAt.IsZero() {
 			if out, err := s.EC2.DescribeNetworkInterfaces(ctx, &ec2.DescribeNetworkInterfacesInput{
@@ -455,6 +452,20 @@ func (s *Scanner) resolveVPCCreationTime(ctx context.Context, infra *InfraSet) {
 	}
 }
 
+func observeEndpoints(vpc *VPCInfo, endpoints []ec2types.VpcEndpoint) {
+	vpc.Endpoints = len(endpoints)
+	vpc.EndpointIDs = nil
+	for _, ep := range endpoints {
+		if id := aws.ToString(ep.VpcEndpointId); id != "" {
+			vpc.EndpointIDs = append(vpc.EndpointIDs, id)
+		}
+		if ep.CreationTimestamp != nil && (vpc.CreatedAt.IsZero() || ep.CreationTimestamp.Before(vpc.CreatedAt)) {
+			vpc.CreatedAt = *ep.CreationTimestamp
+		}
+	}
+	slices.Sort(vpc.EndpointIDs)
+}
+
 //nolint:gocyclo // sequential AWS inventory queries
 func (s *Scanner) inventorySubResources(ctx context.Context, infra *InfraSet) {
 	for i, vpc := range infra.VPCs {
@@ -463,12 +474,7 @@ func (s *Scanner) inventorySubResources(ctx context.Context, infra *InfraSet) {
 		if out, err := s.EC2.DescribeVpcEndpoints(ctx, &ec2.DescribeVpcEndpointsInput{
 			Filters: []ec2types.Filter{{Name: aws.String("vpc-id"), Values: []string{vpcID}}},
 		}); err == nil {
-			infra.VPCs[i].Endpoints = len(out.VpcEndpoints)
-			for _, ep := range out.VpcEndpoints {
-				if ep.CreationTimestamp != nil && (infra.VPCs[i].CreatedAt.IsZero() || ep.CreationTimestamp.Before(infra.VPCs[i].CreatedAt)) {
-					infra.VPCs[i].CreatedAt = *ep.CreationTimestamp
-				}
-			}
+			observeEndpoints(&infra.VPCs[i], out.VpcEndpoints)
 		}
 
 		if out, err := s.EC2.DescribeNatGateways(ctx, &ec2.DescribeNatGatewaysInput{

@@ -119,52 +119,33 @@ func TestExtractNamespace(t *testing.T) {
 	}
 }
 
-func TestProwJobURL(t *testing.T) {
+func TestProwSearchURL(t *testing.T) {
 	tests := []struct {
 		name       string
 		testType   string
-		prowJobID  string
-		wantDirect bool
 		wantSearch bool
 		wantEmpty  bool
 	}{
 		{
-			name:       "When prow-job-id tag is present, it should return a direct job URL",
+			name:       "When the test type is known, it should return a search URL",
 			testType:   "node-pool",
-			prowJobID:  "2074787416719233024",
-			wantDirect: true,
-		},
-		{
-			name:       "When no prow-job-id but test type is known, it should return a search URL",
-			testType:   "node-pool",
-			prowJobID:  "",
 			wantSearch: true,
 		},
 		{
 			name:      "When test type is e2e-generic and no prow-job-id, it should return empty",
 			testType:  "e2e-generic",
-			prowJobID: "",
 			wantEmpty: true,
 		},
 		{
 			name:      "When test type is empty and no prow-job-id, it should return empty",
 			testType:  "",
-			prowJobID: "",
 			wantEmpty: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			url := ProwJobURL(tt.testType, tt.prowJobID)
-			if tt.wantDirect {
-				if !strings.Contains(url, "/view/gs/") {
-					t.Errorf("expected direct job URL, got %q", url)
-				}
-				if !strings.Contains(url, tt.prowJobID) {
-					t.Errorf("expected URL to contain job ID %q, got %q", tt.prowJobID, url)
-				}
-			}
+			url := ProwSearchURL(tt.testType)
 			if tt.wantSearch {
 				if !strings.Contains(url, "query=") {
 					t.Errorf("expected search URL, got %q", url)

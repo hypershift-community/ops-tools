@@ -162,10 +162,39 @@ an `anchorTime` and `anchorSource`: the earliest known VPC creation time, or
 an estimate based on the expiry tag. Missing timestamps are omitted. These
 timestamps do not affect classification or deletion.
 
-For each LEAKED infra set, the tool infers:
+The AWS scan collects local hints for `LEAKED` and `UNCERTAIN` infra sets:
 - **Test type**: from the infraID pattern (e.g., `node-pool`, `create-cluster`, `e2e-generic`)
 - **HC namespace**: from Route53 `service.ci` zone TXT records
-- **Prow link**: direct job URL if `hypershift.openshift.io/prow-job-id` tag exists (PR #8909), otherwise a Prow deck search URL
+- **Prow tag**: the recorded `hypershift.openshift.io/prow-job-id`, when present
+- **Prow search URL**: a hint for known named test types, not evidence of a specific run
+
+### Inspect candidates in Prow
+
+```bash
+make prove INPUT=output/scan-<timestamp>.json
+cleanleaked prove --input output/scan-<timestamp>.json --infra-id <infra-id>
+```
+
+`prove` reads a saved scan and does not call AWS. It looks up only `LEAKED`
+and `UNCERTAIN` rows that have a usable timestamp and a Prow tag or supported
+hash. It searches archived HyperShift periodics in `test-platform-results-public`
+around the AWS timestamp (`--prow-window`, default 6h on either side). It first
+uses the stored tag if present and consistent. Otherwise it compares the exact
+20-character CLI infra ID (or the E2E v2 variant's 10-character suffix) with
+SHA-256 of the original `PROW_JOB_ID` (ProwJob `metadata.name`, not `metadata.uid`;
+no trailing newline).
+
+The result includes the run, build ID, actual job state, and links. Where
+available, it cites an artifact name and separately cites creation log records
+that contain exact VPC or VPC endpoint IDs from the scan. An artifact filename
+alone does not verify an AWS resource. Use `--prow-verify-artifacts=false` to
+skip the corroboration step. Use `--json` to print the same JSON written to
+`output/proofs-<timestamp>.json`.
+
+An unresolved, ambiguous, or unavailable lookup stays explicit in the report.
+Presubmits and jobs outside the retained public archive are not covered. A job
+match establishes provenance; it does not establish that the AWS resources are
+unused.
 
 ## Safety
 

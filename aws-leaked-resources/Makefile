@@ -1,8 +1,9 @@
 BINARY := cleanleaked
 GOLANGCI_VERSION ?= v2.11.4
 REGION ?= us-east-1
+INPUT ?=
 
-.PHONY: build test vet lint clean scan dry-run verify
+.PHONY: build test vet lint clean scan prove dry-run verify
 
 build:
 	@mkdir -p bin
@@ -22,6 +23,9 @@ clean:
 
 scan:
 	go run . scan --region "$(REGION)" --output json
+
+prove:
+	go run . prove --input "$(INPUT)"
 
 dry-run:
 	go run . delete --dry-run --region "$(REGION)"

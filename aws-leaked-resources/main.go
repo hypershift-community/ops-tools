@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -113,6 +114,25 @@ Examples:
 			return runDelete(cmd.Context(), cfg)
 		},
 	}
+	proof := proofOptions{window: 6 * time.Hour, timeout: 2 * time.Minute, verifyArtifacts: true, outputDir: cfg.OutputDir}
+	proveCmd := &cobra.Command{
+		Use:   "prove",
+		Short: "Look up Prow provenance for scan candidates without accessing AWS",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runProve(cmd.Context(), proof)
+		},
+	}
+	proveCmd.Flags().StringVar(&proof.input, "input", "", "Scan JSON report")
+	proveCmd.Flags().StringVar(&proof.target, "infra-id", "", "Look up only this candidate")
+	proveCmd.Flags().DurationVar(&proof.window, "prow-window", proof.window, "Search this far on either side of the AWS timestamp (max 7 days)")
+	proveCmd.Flags().DurationVar(&proof.timeout, "prow-timeout", proof.timeout, "Overall Prow archive timeout")
+	proveCmd.Flags().BoolVar(&proof.verifyArtifacts, "prow-verify-artifacts", true, "Look for candidate artifacts and exact AWS resource IDs in creation logs")
+	proveCmd.Flags().StringVar(&proof.outputDir, "output-dir", proof.outputDir, "Directory for the JSON proof report (empty to disable)")
+	proveCmd.Flags().BoolVar(&proof.json, "json", false, "Print JSON instead of the human-readable report")
+	if err := proveCmd.MarkFlagRequired("input"); err != nil {
+		panic(err)
+	}
 
 	scanCmd.Flags().StringVar(&cfg.Region, "region", cfg.Region, "AWS region")
 	scanCmd.Flags().DurationVar(&cfg.MinAge, "min-age", cfg.MinAge, "Minimum VPC age to consider for deletion")
@@ -130,7 +150,7 @@ Examples:
 	deleteCmd.Flags().StringVar(&cfg.OutputFormat, "output", cfg.OutputFormat, "Output format: table or json")
 	deleteCmd.Flags().StringVar(&cfg.OutputDir, "output-dir", cfg.OutputDir, "Directory for report files (empty to disable)")
 
-	rootCmd.AddCommand(scanCmd, deleteCmd)
+	rootCmd.AddCommand(scanCmd, proveCmd, deleteCmd)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sigs := make(chan os.Signal, 1)
@@ -218,7 +238,7 @@ func runScan(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("scan failed: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Correlating with Prow data...\n")
+	fmt.Fprintf(os.Stderr, "Adding CI hints from AWS inventory...\n")
 	CorrelateWithProw(ctx, scanner.Route53, results)
 
 	out := tee(os.Stdout, fileW)
@@ -240,6 +260,48 @@ func runScan(ctx context.Context, cfg Config) error {
 		PrintSummary(out, results)
 	}
 
+	return nil
+}
+
+type proofOptions struct {
+	input, target, outputDir string
+	window, timeout          time.Duration
+	verifyArtifacts, json    bool
+}
+
+func runProve(ctx context.Context, cfg proofOptions) error {
+	if cfg.window <= 0 || cfg.window > 7*24*time.Hour || cfg.timeout <= 0 {
+		return fmt.Errorf("require a positive --prow-window (at most 7 days) and --prow-timeout")
+	}
+	report, err := readReport(cfg.input, "scan")
+	if err != nil {
+		return err
+	}
+	archive := prowArchive{baseURL: prowStorageURL, client: &http.Client{Timeout: 15 * time.Second}}
+	lookupCtx, cancel := context.WithTimeout(ctx, cfg.timeout)
+	defer cancel()
+	report.InfraSets = archive.prove(lookupCtx, report.InfraSets, cfg.target, cfg.window, cfg.verifyArtifacts)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if cfg.target != "" && len(report.InfraSets) == 0 {
+		return fmt.Errorf("no leak candidate with infra ID %q in scan report", cfg.target)
+	}
+	report.Command = "prove"
+	report.GeneratedAt = time.Now().UTC()
+	fileW, closeFile, err := openReportFile(cfg.outputDir, "proofs", "json")
+	if err != nil {
+		return err
+	}
+	defer closeFile()
+	if cfg.json {
+		return PrintJSON(tee(os.Stdout, fileW), report)
+	}
+	if err := PrintJSON(fileW, report); err != nil {
+		return err
+	}
+	PrintTable(os.Stdout, report.InfraSets)
+	PrintSummary(os.Stdout, report.InfraSets)
 	return nil
 }
 

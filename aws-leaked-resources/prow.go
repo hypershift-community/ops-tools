@@ -74,13 +74,8 @@ func isHexInfraID(s string) bool {
 	return hexPattern.MatchString(s)
 }
 
-// ProwJobURL returns a direct Prow link when we have the job name and build ID,
-// or a search URL as fallback.
-func ProwJobURL(testType, prowJobID string) string {
-	if prowJobID != "" {
-		return fmt.Sprintf("%s/view/gs/test-platform-results/logs/%s", prowDeckURL, prowJobID)
-	}
-
+// ProwSearchURL is a hint, not a link to a specific run.
+func ProwSearchURL(testType string) string {
 	if testType == "" || testType == "e2e-generic" {
 		return ""
 	}
@@ -180,15 +175,7 @@ func CorrelateWithProw(ctx context.Context, r53 Route53API, sets []InfraSet) {
 		testType, _ := InferTestType(infra.InfraID)
 		sets[i].TestType = testType
 
-		// Use the prow-job-id tag from any VPC if available (PR #8909)
-		prowJobID := ""
-		for _, vpc := range infra.VPCs {
-			if vpc.ProwJobID != "" {
-				prowJobID = vpc.ProwJobID
-				break
-			}
-		}
-		sets[i].ProwLink = ProwJobURL(testType, prowJobID)
+		sets[i].ProwLink = ProwSearchURL(testType)
 
 		if serviceCIZoneID != "" && testType != "" && testType != "e2e-generic" {
 			ns := LookupNamespaceFromServiceZone(ctx, r53, serviceCIZoneID, infra.InfraID)

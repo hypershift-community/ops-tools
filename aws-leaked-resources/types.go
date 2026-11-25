@@ -27,9 +27,10 @@ type InfraSet struct {
 	AnchorSource  string    `json:"anchorSource,omitempty"`
 
 	// Prow correlation
-	TestType  string // "node-pool", "create-cluster", "control-plane-upgrade", etc.
-	Namespace string // "e2e-clusters-XXXXX-<cluster>" from service.ci TXT records
-	ProwLink  string // URL to Prow deck search for this test type
+	TestType  string     // "node-pool", "create-cluster", "control-plane-upgrade", etc.
+	Namespace string     // "e2e-clusters-XXXXX-<cluster>" from service.ci TXT records
+	ProwLink  string     // Prow search or resolved run URL
+	Prow      *ProwProof `json:"prow,omitempty"`
 }
 
 const reportSchemaVersion = 1
@@ -62,6 +63,7 @@ type VPCInfo struct {
 	ProwJobID   string
 
 	Endpoints        int
+	EndpointIDs      []string `json:"endpointIDs,omitempty"`
 	EndpointServices int
 	ENIs             int
 	NATGateways      int
