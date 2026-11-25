@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,7 +39,7 @@ Each VPC is classified through a series of gates:
   TOO_YOUNG  - Created less than --min-age ago (skipped)
   ACTIVE     - OIDC S3 doc or EC2 instances still exist (live cluster)
   UNCERTAIN  - No CI pattern match; may belong to a developer
-  LEAKED     - No OIDC, no instances, matches CI pattern (safe to delete)
+  LEAKED     - No OIDC, no instances, matches CI pattern (cleanup candidate)
 
 Examples:
   # Scan and report all VPCs
@@ -53,11 +54,12 @@ Examples:
   # Delete first 5 leaked infra sets, prompting for each one
   cleanleaked delete --limit 5 --interactive
 
-  # Delete all leaked infra sets without prompts (CI-safe)
-  cleanleaked delete --confirm
+  # Corroborate the candidates from a saved scan and preview deletion
+  cleanleaked prove --input output/scan-<timestamp>.json
+  cleanleaked delete --dry-run --proof output/proofs-<timestamp>.json
 
   # Delete with a 48h age threshold
-  cleanleaked delete --min-age 48h --confirm
+  cleanleaked delete --min-age 48h --proof output/proofs-<timestamp>.json
 
   # Scan a single VPC by ID
   cleanleaked scan --target vpc-066231b8dc5a4400f
@@ -66,7 +68,7 @@ Examples:
   cleanleaked scan --target node-pool-78vcg
 
   # Delete a specific infra set interactively
-  cleanleaked delete --target 00ab3695c5f73d4354b9 --interactive`,
+  cleanleaked delete --target 00ab3695c5f73d4354b9 --interactive --proof output/proofs-<timestamp>.json`,
 	}
 
 	scanCmd := &cobra.Command{
@@ -96,22 +98,25 @@ Examples:
   Then: Route53 zones, OIDC providers, IAM roles.
 
 Three modes:
-  delete                Prompt once at the start, then delete all
-  delete --confirm      No prompts, delete all immediately (CI-safe)
+  delete                Prompt once, then delete all eligible sets
+  delete --confirm      No prompts, delete all eligible sets
   delete --interactive  Show full inventory per infra set, prompt for each
 
 Safety: resources with do-not-delete=true, protected VPC names, protected
 usernames, running instances, or unexpired expirationDate are NEVER deleted.
+Only current LEAKED candidates with matching Prow proof are eligible by default.
 
 Examples:
-  cleanleaked delete --dry-run
-  cleanleaked delete --limit 10 --interactive
-  cleanleaked delete --confirm --min-age 48h
-  cleanleaked delete --target node-pool-78vcg --interactive
-  cleanleaked delete --target vpc-0abc123 --confirm`,
+  cleanleaked delete --dry-run --proof output/proofs-<timestamp>.json
+  cleanleaked delete --limit 10 --interactive --proof output/proofs-<timestamp>.json
+  cleanleaked delete --confirm --min-age 48h --proof output/proofs-<timestamp>.json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg.Delete = true
-			return runDelete(cmd.Context(), cfg)
+			err := runDelete(cmd.Context(), cfg)
+			if errors.Is(err, errUnprovenLeaks) {
+				cmd.SilenceUsage = true
+			}
+			return err
 		},
 	}
 	proof := proofOptions{window: 6 * time.Hour, timeout: 2 * time.Minute, verifyArtifacts: true, outputDir: cfg.OutputDir}
@@ -144,11 +149,13 @@ Examples:
 	deleteCmd.Flags().DurationVar(&cfg.MinAge, "min-age", cfg.MinAge, "Minimum VPC age to consider for deletion")
 	deleteCmd.Flags().StringVar(&cfg.Target, "target", cfg.Target, "Delete a single infraID or VPC ID instead of all leaked")
 	deleteCmd.Flags().BoolVar(&cfg.DryRun, "dry-run", cfg.DryRun, "Show what would be deleted without deleting")
-	deleteCmd.Flags().BoolVar(&cfg.Confirm, "confirm", cfg.Confirm, "No prompts, delete all leaked resources immediately")
+	deleteCmd.Flags().BoolVar(&cfg.Confirm, "confirm", cfg.Confirm, "No prompts, delete eligible leaked resources immediately")
 	deleteCmd.Flags().BoolVarP(&cfg.Interactive, "interactive", "i", cfg.Interactive, "Prompt before each individual resource deletion")
 	deleteCmd.Flags().IntVar(&cfg.Limit, "limit", cfg.Limit, "Max number of infra sets to delete (0 = no limit)")
 	deleteCmd.Flags().StringVar(&cfg.OutputFormat, "output", cfg.OutputFormat, "Output format: table or json")
 	deleteCmd.Flags().StringVar(&cfg.OutputDir, "output-dir", cfg.OutputDir, "Directory for report files (empty to disable)")
+	deleteCmd.Flags().StringVar(&cfg.ProofFile, "proof", "", "JSON report produced by prove")
+	deleteCmd.Flags().BoolVar(&cfg.RequireProof, "require-proof", cfg.RequireProof, "Require matching Prow proof before deleting a LEAKED candidate")
 
 	rootCmd.AddCommand(scanCmd, proveCmd, deleteCmd)
 
@@ -161,6 +168,9 @@ Examples:
 	}()
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
+		if errors.Is(err, errUnprovenLeaks) {
+			os.Exit(2)
+		}
 		os.Exit(1)
 	}
 }
@@ -306,7 +316,15 @@ func runProve(ctx context.Context, cfg proofOptions) error {
 }
 
 func runDelete(ctx context.Context, cfg Config) error {
-	scanner, err := newScanner(ctx, cfg)
+	proofs, err := loadDeleteProof(cfg.ProofFile, cfg.Region)
+	if err != nil {
+		return err
+	}
+	// Apply the limit to eligible results, not to the first AWS candidates seen.
+	scanCfg := cfg
+	scanCfg.Delete = true
+	scanCfg.Limit = 0
+	scanner, err := newScanner(ctx, scanCfg)
 	if err != nil {
 		return err
 	}
@@ -317,7 +335,7 @@ func runDelete(ctx context.Context, cfg Config) error {
 	} else if cfg.Interactive {
 		prefix = "interactive-delete"
 	}
-	fileW, closeFile, err := openReportFile(cfg.OutputDir, prefix, "table")
+	fileW, closeFile, err := openReportFile(cfg.OutputDir, prefix, cfg.OutputFormat)
 	if err != nil {
 		return err
 	}
@@ -330,17 +348,38 @@ func runDelete(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("scan failed: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Correlating with Prow data...\n")
+	fmt.Fprintf(os.Stderr, "Adding CI hints from AWS inventory...\n")
 	CorrelateWithProw(ctx, scanner.Route53, results)
+	sortSets(results)
+	leaked, skipped := selectDeletable(results, proofs, cfg.RequireProof)
 
 	out := tee(os.Stdout, fileW)
-
-	PrintTable(out, results)
-	PrintSummary(out, results)
-
-	leaked := FilterLeaked(results)
+	if cfg.OutputFormat == "json" {
+		if err := PrintJSON(out, Report{
+			SchemaVersion: reportSchemaVersion, Command: prefix, GeneratedAt: time.Now().UTC(),
+			Region: cfg.Region, MinAge: cfg.MinAge.String(), InfraSets: results,
+		}); err != nil {
+			return err
+		}
+		out = os.Stderr
+	} else {
+		PrintTable(out, results)
+		PrintSummary(out, results)
+	}
+	if skipped > 0 {
+		_, _ = fmt.Fprintf(out, "\nSkipped %d leaked infra sets without sufficient proof. Run prove and pass --proof <file>; use --require-proof=false only after manual review.\n", skipped)
+	}
+	if !cfg.RequireProof {
+		_, _ = fmt.Fprintln(out, "\nWARNING: Prow proof requirement disabled. AWS classification still applies.")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if len(leaked) == 0 {
-		_, _ = fmt.Fprintln(out, "\nNo leaked resources to delete.")
+		_, _ = fmt.Fprintln(out, "\nNo eligible leaked resources to delete.")
+		if skipped > 0 && !cfg.DryRun {
+			return errUnprovenLeaks
+		}
 		return nil
 	}
 
@@ -368,22 +407,23 @@ func runDelete(ctx context.Context, cfg Config) error {
 		IAM:     scanner.IAM,
 	}
 
-	// Mode 1: --confirm → no prompts, delete everything
-	if cfg.Confirm {
-		return deleter.DeleteAll(ctx, leaked, ConfirmAll)
+	mode := ConfirmAll
+	if !cfg.Confirm {
+		if cfg.Interactive {
+			mode = ConfirmEach
+		} else {
+			fmt.Fprintf(os.Stderr, "\nWARNING: This will delete %d infra sets (%d VPCs, %d zones) and ALL their sub-resources.\n", len(leaked), totalVPCs, totalZones)
+			if !promptYN("Proceed with deletion?") {
+				fmt.Fprintln(os.Stderr, "Aborted.")
+				return nil
+			}
+		}
 	}
-
-	// Mode 2: --interactive → prompt per resource
-	if cfg.Interactive {
-		return deleter.DeleteAll(ctx, leaked, ConfirmEach)
+	if err := deleter.DeleteAll(ctx, leaked, mode); err != nil {
+		return err
 	}
-
-	// Mode 3: no flags → prompt once at the start
-	fmt.Fprintf(os.Stderr, "\nWARNING: This will delete %d infra sets (%d VPCs, %d zones) and ALL their sub-resources.\n", len(leaked), totalVPCs, totalZones)
-	if !promptYN("Proceed with deletion?") {
-		fmt.Fprintln(os.Stderr, "Aborted.")
-		return nil
+	if skipped > 0 {
+		return errUnprovenLeaks
 	}
-
-	return deleter.DeleteAll(ctx, leaked, ConfirmAll)
+	return nil
 }

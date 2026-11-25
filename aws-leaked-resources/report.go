@@ -42,6 +42,9 @@ func PrintTable(w io.Writer, sets []InfraSet) {
 			s.Verdict, age, vpcCount, s.InfraID, s.VerdictReason)
 
 		if s.Verdict == VerdictLeaked || s.Verdict == VerdictUncertain {
+			if s.DeleteBlock != "" {
+				_, _ = fmt.Fprintf(w, "  %-22s SKIPPED: %s\n", "", s.DeleteBlock)
+			}
 			if s.TestType != "" {
 				prowInfo := fmt.Sprintf("test=%s", s.TestType)
 				if s.Namespace != "" {

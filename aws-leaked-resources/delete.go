@@ -56,6 +56,7 @@ func (d *Deleter) DeleteAll(ctx context.Context, leaked []InfraSet, mode Confirm
 		fmt.Fprintf(os.Stderr, "\n=== Infra set: %s ===\n", infra.InfraID)
 
 		if mode == ConfirmEach {
+			printProwProof(os.Stderr, infra, "  ")
 			d.printDetailedInventory(ctx, infra)
 			if !promptYN(fmt.Sprintf("Delete ALL resources for %s?", infra.InfraID)) {
 				fmt.Fprintf(os.Stderr, "  Skipped.\n")

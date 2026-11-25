@@ -25,6 +25,7 @@ type InfraSet struct {
 	Age           time.Duration
 	AnchorTime    time.Time `json:"anchorTime,omitzero"`
 	AnchorSource  string    `json:"anchorSource,omitempty"`
+	DeleteBlock   string    `json:"deleteBlock,omitempty"`
 
 	// Prow correlation
 	TestType  string     // "node-pool", "create-cluster", "control-plane-upgrade", etc.
@@ -47,6 +48,7 @@ type Report struct {
 
 type VPCInfo struct {
 	VPCID     string
+	OwnerID   string `json:"ownerID,omitempty"`
 	Name      string
 	CIDR      string
 	State     string
@@ -96,6 +98,8 @@ type Config struct {
 	Target         string
 	OutputFormat   string
 	OutputDir      string
+	ProofFile      string
+	RequireProof   bool
 }
 
 func DefaultConfig() Config {
@@ -126,5 +130,6 @@ func DefaultConfig() Config {
 		},
 		OutputFormat: "table",
 		OutputDir:    "output",
+		RequireProof: true,
 	}
 }

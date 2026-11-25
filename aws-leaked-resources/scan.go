@@ -59,6 +59,17 @@ func (s *Scanner) Scan(ctx context.Context) ([]InfraSet, error) {
 	}
 
 	grouped := s.groupByInfraID(vpcs)
+	if s.Config.Delete && s.Config.Target != "" && len(grouped) > 0 {
+		// Shared IAM and DNS resources are deleted by infra ID, not by VPC ID.
+		// Refuse a partial target instead of silently expanding its delete scope.
+		all, err := s.fetchAllVPCs(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("verify complete target inventory: %w", err)
+		}
+		if err := verifyDeleteTargets(grouped, s.groupByInfraID(all)); err != nil {
+			return nil, err
+		}
+	}
 	fmt.Fprintf(os.Stderr, "  Found %d VPCs, %d infra sets\n", len(vpcs), len(grouped))
 
 	fmt.Fprintf(os.Stderr, "  Fetching OIDC providers...\n")
@@ -161,6 +172,15 @@ func (s *Scanner) Scan(ctx context.Context) ([]InfraSet, error) {
 	return results, nil
 }
 
+func verifyDeleteTargets(targets, full map[string][]VPCInfo) error {
+	for id, vpcs := range targets {
+		if !sameVPCs(vpcs, full[id]) {
+			return fmt.Errorf("target selects only part of infra set %q or the inventory changed; scan the complete set before deleting", id)
+		}
+	}
+	return nil
+}
+
 func setAnchorTime(infra *InfraSet) {
 	if oldest := oldestVPC(infra.VPCs); !oldest.IsZero() {
 		infra.AnchorTime, infra.AnchorSource = oldest, "vpc"
@@ -247,6 +267,7 @@ func (s *Scanner) groupByInfraID(vpcs []ec2types.Vpc) map[string][]VPCInfo {
 
 		info := VPCInfo{
 			VPCID:          aws.ToString(vpc.VpcId),
+			OwnerID:        aws.ToString(vpc.OwnerId),
 			Name:           vpcName,
 			CIDR:           aws.ToString(vpc.CidrBlock),
 			State:          string(vpc.State),

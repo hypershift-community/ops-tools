@@ -2,8 +2,9 @@ BINARY := cleanleaked
 GOLANGCI_VERSION ?= v2.11.4
 REGION ?= us-east-1
 INPUT ?=
+PROOF ?=
 
-.PHONY: build test vet lint clean scan prove dry-run verify
+.PHONY: build test vet lint clean scan prove dry-run delete pipeline verify
 
 build:
 	@mkdir -p bin
@@ -28,6 +29,17 @@ prove:
 	go run . prove --input "$(INPUT)"
 
 dry-run:
-	go run . delete --dry-run --region "$(REGION)"
+	go run . delete --dry-run --region "$(REGION)" --proof "$(PROOF)"
+
+delete:
+	@test -n "$(PROOF)" || { echo 'Usage: make delete PROOF=output/proofs-<timestamp>.json [REGION=us-east-1]' >&2; exit 1; }
+	go run . delete --interactive --region "$(REGION)" --proof "$(PROOF)"
+
+pipeline:
+	@set -eu; mkdir -p output; dir=$$(mktemp -d output/pipeline.XXXXXXXX); \
+	  echo "Pipeline reports: $$dir" >&2; \
+	  go run . scan --region "$(REGION)" --output json --output-dir '' > "$$dir/scan.json"; \
+	  go run . prove --input "$$dir/scan.json" --json --output-dir '' > "$$dir/proofs.json"; \
+	  go run . delete --dry-run --region "$(REGION)" --proof "$$dir/proofs.json" --output-dir "$$dir"
 
 verify: build test vet lint
