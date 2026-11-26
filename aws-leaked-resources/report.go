@@ -4,26 +4,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 )
 
-func PrintTable(w io.Writer, sets []InfraSet) {
+func sortSets(sets []InfraSet) {
+	order := map[Verdict]int{
+		VerdictProtected: 0,
+		VerdictActive:    1,
+		VerdictTooYoung:  2,
+		VerdictUncertain: 3,
+		VerdictLeaked:    4,
+	}
 	sort.Slice(sets, func(i, j int) bool {
-		order := map[Verdict]int{
-			VerdictProtected: 0,
-			VerdictActive:    1,
-			VerdictTooYoung:  2,
-			VerdictUncertain: 3,
-			VerdictLeaked:    4,
-		}
 		if order[sets[i].Verdict] != order[sets[j].Verdict] {
 			return order[sets[i].Verdict] < order[sets[j].Verdict]
 		}
 		return sets[i].InfraID < sets[j].InfraID
 	})
+}
 
+func PrintTable(w io.Writer, sets []InfraSet) {
+	sortSets(sets)
 	_, _ = fmt.Fprintf(w, "%-24s %-12s %-4s %-42s %s\n", "VERDICT", "AGE", "VPCs", "INFRA-ID", "REASON")
 	_, _ = fmt.Fprintf(w, "%s\n", strings.Repeat("-", 120))
 
@@ -38,16 +42,20 @@ func PrintTable(w io.Writer, sets []InfraSet) {
 			s.Verdict, age, vpcCount, s.InfraID, s.VerdictReason)
 
 		if s.Verdict == VerdictLeaked || s.Verdict == VerdictUncertain {
+			if s.DeleteBlock != "" {
+				_, _ = fmt.Fprintf(w, "  %-22s SKIPPED: %s\n", "", s.DeleteBlock)
+			}
 			if s.TestType != "" {
 				prowInfo := fmt.Sprintf("test=%s", s.TestType)
 				if s.Namespace != "" {
 					prowInfo += fmt.Sprintf("  ns=%s", s.Namespace)
 				}
-				if s.ProwLink != "" {
+				if s.ProwLink != "" && (s.Prow == nil || s.Prow.Status != "matched") {
 					prowInfo += fmt.Sprintf("  prow=%s", s.ProwLink)
 				}
 				_, _ = fmt.Fprintf(w, "  %-22s %s\n", "", prowInfo)
 			}
+			printProwProof(w, s, strings.Repeat(" ", 24))
 			for _, vpc := range s.VPCs {
 				subRes := formatSubResources(vpc)
 				provenance := formatProvenance(vpc)
@@ -70,6 +78,31 @@ func PrintTable(w io.Writer, sets []InfraSet) {
 	}
 }
 
+func printProwProof(w io.Writer, s InfraSet, indent string) {
+	p := s.Prow
+	if p == nil {
+		return
+	}
+	if p.Status != "matched" {
+		_, _ = fmt.Fprintf(w, "%sProw: %s — %s\n", indent, p.Status, p.Reason)
+		return
+	}
+	_, _ = fmt.Fprintf(w, "%sProw: matched by %s — %s (build=%s, result=%s, created=%s)\n", indent, p.Method, p.Job, p.BuildID, p.Result, p.CreatedAt.Format(time.RFC3339))
+	_, _ = fmt.Fprintf(w, "%s  PROW_JOB_ID=%s  %s\n", indent, p.JobID, s.ProwLink)
+	if p.MatchedHex != "" {
+		_, _ = fmt.Fprintf(w, "%s  sha256(PROW_JOB_ID)[:%d]=%s\n", indent, len(p.MatchedHex), p.MatchedHex)
+	}
+	if p.ArtifactURL != "" {
+		_, _ = fmt.Fprintf(w, "%s  artifact name: %s\n", indent, p.ArtifactURL)
+	}
+	for _, r := range p.Resources {
+		_, _ = fmt.Fprintf(w, "%s  confirmed %s in creation log: %s\n", indent, r.ID, r.URL)
+	}
+	if p.ArtifactNote != "" {
+		_, _ = fmt.Fprintf(w, "%s  %s\n", indent, p.ArtifactNote)
+	}
+}
+
 func PrintSummary(w io.Writer, sets []InfraSet) {
 	counts := CountByVerdict(sets)
 	totalVPCs := 0
@@ -87,13 +120,38 @@ func PrintSummary(w io.Writer, sets []InfraSet) {
 	_, _ = fmt.Fprintf(w, "  Uncertain:   %d (%d VPCs)\n", counts[VerdictUncertain], countVPCs(sets, VerdictUncertain))
 	_, _ = fmt.Fprintf(w, "  Leaked:      %d (%d VPCs)\n", counts[VerdictLeaked], countVPCs(sets, VerdictLeaked))
 	_, _ = fmt.Fprintf(w, "  Total:       %d infra sets (%d VPCs)\n", len(sets), totalVPCs)
+	var attempted, failedMatches int
+	for _, s := range sets {
+		if s.Prow != nil {
+			attempted++
+			if s.Prow.Status == "matched" && failedProwRun(s.Prow.Result) {
+				failedMatches++
+			}
+		}
+	}
+	if attempted > 0 {
+		_, _ = fmt.Fprintf(w, "  Prow:        %d/%d candidates matched to unsuccessful runs\n", failedMatches, attempted)
+	}
 	_, _ = fmt.Fprintf(w, "==============================\n")
 }
 
-func PrintJSON(w io.Writer, sets []InfraSet) error {
+func PrintJSON(w io.Writer, report Report) error {
+	report.InfraSets = append([]InfraSet{}, report.InfraSets...)
+	sortSets(report.InfraSets)
+	for i := range report.InfraSets {
+		set := &report.InfraSets[i]
+		set.VPCs = slices.Clone(set.VPCs)
+		sort.Slice(set.VPCs, func(i, j int) bool { return set.VPCs[i].VPCID < set.VPCs[j].VPCID })
+		set.HostedZones = slices.Clone(set.HostedZones)
+		sort.Slice(set.HostedZones, func(i, j int) bool { return set.HostedZones[i].ZoneID < set.HostedZones[j].ZoneID })
+		set.IAMRoles = slices.Clone(set.IAMRoles)
+		slices.Sort(set.IAMRoles)
+		set.OIDCProviders = slices.Clone(set.OIDCProviders)
+		slices.Sort(set.OIDCProviders)
+	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(sets)
+	return enc.Encode(report)
 }
 
 func formatDuration(d time.Duration) string {

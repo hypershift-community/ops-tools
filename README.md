@@ -10,14 +10,15 @@ or shared build target.
 
 | Directory | Purpose | Go version declared in `go.mod` |
 | --- | --- | --- |
+| [`aws-leaked-resources`](aws-leaked-resources/) | Investigate AWS leaks from HyperShift CI, correlate them with archived Prow jobs, and optionally clean up proven candidates. | 1.26.3 |
 | [`cleanroles`](cleanroles/) | Clean up selected AWS IAM roles and associated policies/instance profiles using VPC-derived infrastructure IDs. | 1.24.4 |
 | [`cleanzones`](cleanzones/) | Clean up selected AWS Route 53 private zones and records in hard-coded public zones using VPC-derived infrastructure IDs. | 1.25.7 |
 | [`cleanzones-azure`](cleanzones-azure/) | Clean up matching Azure DNS records using resource-group-derived infrastructure IDs. | 1.26.3 |
 | [`aws-tag-lb-service-webhook`](aws-tag-lb-service-webhook/) | Mutate Kubernetes LoadBalancer Services to add `red-hat-managed=true` to the AWS additional-resource-tags annotation. | 1.23 |
 
-The AWS modules retain their inherited `github.com/openshift/hypershift/...`
-module paths. Build them from their local directories rather than assuming an
-install path under this repository's name.
+Some extracted tools retain their inherited `github.com/openshift/hypershift/...`
+module paths. Build each tool from its own directory rather than inferring an
+install path from this repository's name.
 
 ## Build and test
 
@@ -31,9 +32,10 @@ go build -o app
 go test ./...
 ```
 
-The webhook has unit tests in `main_test.go`; the cleanup tools currently have
-no test files. The `cleanroles` and `cleanzones` Dockerfiles use `go build .`
-inside their respective directories. For Azure build and flag examples, see
+For `cleanleaked`, run `make verify` in [`aws-leaked-resources/`](aws-leaked-resources/)
+to build, run unit tests, vet, and lint without accessing AWS or Prow. The
+`cleanroles` and `cleanzones` Dockerfiles use `go build .` inside their respective
+directories. For Azure build and flag examples, see
 [`cleanzones-azure/README.md`](cleanzones-azure/README.md).
 
 ## Operational safety
@@ -45,6 +47,11 @@ resource groups, and DNS zones before any run. Infrastructure-ID matching is a
 heuristic, not proof that a resource is unused; an incomplete inventory can
 expose active resources to deletion. Never run cleanup as a build or test step.
 
+- **`cleanleaked`:** Start with `make flow REGION=us-east-1` in
+  [`aws-leaked-resources/`](aws-leaked-resources/README.md). The flow generates
+  evidence and an HTML report without deleting anything. By default, `delete`
+  requires a fresh `LEAKED` verdict and sufficient proof from an unsuccessful
+  archived Prow run.
 - **`cleanroles`:** Uses the AWS SDK default credential chain and scans VPCs in
   `us-east-1`, `us-east-2`, `us-west-1`, `us-west-2`, and `eu-west-1`. It filters
   roles by age and hard-coded name prefixes/suffixes. Deletion is enabled by
@@ -63,8 +70,8 @@ expose active resources to deletion. Never run cleanup as a build or test step.
   `/etc/webhook/certs/tls.crt` and `/etc/webhook/certs/tls.key`. The inherited
   manifests use OpenShift serving-certificate and CA-injection annotations.
 
-The AWS tools include IAM policy JSON and CronJob/ServiceAccount manifests; the
-webhook includes Deployment, Service, and MutatingWebhookConfiguration manifests.
+`cleanroles` and `cleanzones` include IAM policy JSON and CronJob/ServiceAccount
+manifests; the webhook includes Deployment, Service, and MutatingWebhookConfiguration manifests.
 These contain inherited image references, account-specific roles, namespaces,
 and schedules. Review and adapt them before deployment; they do not establish
 CI infrastructure for this repository. The cleanup CronJobs do not enable
